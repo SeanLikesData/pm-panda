@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from pmagents import PRDAgent
+from pmagents import PRDAgent, SpecAgent
 from config import AgentConfig
 
 # Initialize FastAPI app
@@ -33,13 +33,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global agent instance
+# Global agent instances
 prd_agent = PRDAgent()
+spec_agent = SpecAgent()
 
 # Request/Response models
 class ChatRequest(BaseModel):
     message: str
     template_type: str = "lean"
+    agent_type: str = "prd"  # "prd" or "spec"
     project_id: Optional[int] = None
     project_context: Optional[Dict[str, Any]] = None
     chat_history: Optional[List[Dict[str, Any]]] = None
@@ -70,11 +72,23 @@ async def health_check():
 # Agent endpoints
 @app.post("/agents/chat", response_model=ChatResponse)
 async def chat_with_agent(request: ChatRequest):
-    """Chat with PRD creation agent."""
+    """Chat with PRD or Spec creation agent."""
     try:
-        response = await prd_agent.chat(
+        # Select the appropriate agent
+        if request.agent_type == "spec":
+            agent = spec_agent
+            # Use default spec template if not specified or if using PRD template
+            if request.template_type in ["lean", "agile", "startup", "amazon", "technical", "enterprise"]:
+                template_type = "api"  # Default spec template
+            else:
+                template_type = request.template_type
+        else:
+            agent = prd_agent
+            template_type = request.template_type
+        
+        response = await agent.chat(
             user_message=request.message,
-            template_type=request.template_type,
+            template_type=template_type,
             project_context=request.project_context,
             chat_history=request.chat_history
         )
@@ -91,21 +105,28 @@ async def chat_with_agent(request: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
 
 @app.get("/agents/templates")
-async def get_available_templates():
-    """Get list of available PRD templates."""
+async def get_available_templates(agent_type: str = "prd"):
+    """Get list of available templates for PRD or Spec agents."""
     try:
-        templates = prd_agent.get_available_templates()
-        return {"templates": templates}
+        if agent_type == "spec":
+            templates = spec_agent.get_available_templates()
+        else:
+            templates = prd_agent.get_available_templates()
+        return {"templates": templates, "agent_type": agent_type}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Template error: {str(e)}")
 
 @app.get("/agents/templates/{template_type}", response_model=TemplateInfo)
-async def get_template_info(template_type: str):
+async def get_template_info(template_type: str, agent_type: str = "prd"):
     """Get information about a specific template."""
     try:
-        template_info = prd_agent.get_template_info(template_type)
+        if agent_type == "spec":
+            template_info = spec_agent.get_template_info(template_type)
+        else:
+            template_info = prd_agent.get_template_info(template_type)
+            
         if not template_info:
-            raise HTTPException(status_code=404, detail=f"Template {template_type} not found")
+            raise HTTPException(status_code=404, detail=f"Template {template_type} not found for {agent_type} agent")
         
         return TemplateInfo(**template_info)
     except HTTPException:
@@ -114,24 +135,30 @@ async def get_template_info(template_type: str):
         raise HTTPException(status_code=500, detail=f"Template error: {str(e)}")
 
 @app.get("/agents/conversation", response_model=ConversationHistory)
-async def get_conversation_history():
-    """Get conversation history."""
+async def get_conversation_history(agent_type: str = "prd"):
+    """Get conversation history for PRD or Spec agent."""
     try:
-        history = prd_agent.get_conversation_history()
+        if agent_type == "spec":
+            history = spec_agent.get_conversation_history()
+        else:
+            history = prd_agent.get_conversation_history()
         return ConversationHistory(messages=history)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"History error: {str(e)}")
 
 @app.post("/agents/conversation/clear")
-async def clear_conversation():
-    """Clear conversation history."""
+async def clear_conversation(agent_type: str = "prd"):
+    """Clear conversation history for PRD or Spec agent."""
     try:
-        prd_agent.clear_conversation()
-        return {"message": "Conversation cleared successfully"}
+        if agent_type == "spec":
+            spec_agent.clear_conversation()
+        else:
+            prd_agent.clear_conversation()
+        return {"message": f"{agent_type.upper()} conversation cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Clear error: {str(e)}")
 
-# Direct PRD generation endpoint
+# Direct generation endpoints
 @app.post("/agents/generate-prd")
 async def generate_prd_direct(request: ChatRequest):
     """Direct PRD generation without conversation."""
@@ -154,7 +181,37 @@ async def generate_prd_direct(request: ChatRequest):
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PRD generation error: {str(e)}")
+
+@app.post("/agents/generate-spec")
+async def generate_spec_direct(request: ChatRequest):
+    """Direct Spec generation without conversation."""
+    try:
+        # Clear previous conversation for clean generation
+        spec_agent.clear_conversation()
+        
+        # Use default spec template if not specified or if using PRD template
+        if request.template_type in ["lean", "agile", "startup", "amazon", "technical", "enterprise"]:
+            template_type = "api"  # Default spec template
+        else:
+            template_type = request.template_type
+        
+        response = await spec_agent.chat(
+            user_message=request.message,
+            template_type=template_type,
+            project_context=request.project_context
+        )
+        
+        return ChatResponse(
+            content=response["content"],
+            type=response.get("type", "spec_content"),
+            requires_input=response.get("requires_input", False),
+            missing_info=response.get("missing_info"),
+            metadata=response.get("metadata")
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Spec generation error: {str(e)}")
 
 # Validation endpoint
 @app.post("/agents/validate")
@@ -203,7 +260,8 @@ async def internal_error_handler(request, exc):
 async def startup_event():
     """Initialize services on startup."""
     print("🚀 AI Agents server starting up...")
-    print(f"📋 Available templates: {prd_agent.get_available_templates()}")
+    print(f"📋 Available PRD templates: {prd_agent.get_available_templates()}")
+    print(f"🔧 Available Spec templates: {spec_agent.get_available_templates()}")
     print("✅ AI Agents server ready!")
 
 # Shutdown event

@@ -16,8 +16,9 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { agentsApi, type ChatResponse } from "@/lib/agentsApi";
 import { prdApi } from "@/lib/prdApi";
+import { specApi } from "@/lib/specApi";
 import { chatApi } from "@/lib/chatApi";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { refreshProjectData } from "@/lib/projectDataRefresh";
@@ -37,9 +38,18 @@ interface Message {
 
 export function ChatSidebar() {
   const { projectId } = useParams<{ projectId: string }>();
+  const location = useLocation();
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
+  // Determine current context from URL hash or default to PRD
+  const getCurrentContext = (): "prd" | "spec" => {
+    const hash = location.hash;
+    if (hash.includes("spec")) return "spec";
+    return "prd";
+  };
+
+  const [currentContext, setCurrentContext] = useState<"prd" | "spec">(getCurrentContext());
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -47,8 +57,9 @@ export function ChatSidebar() {
   const [selectedTemplate, setSelectedTemplate] = useState("lean");
   const [availableTemplates, setAvailableTemplates] = useState<string[]>([]);
   const [agentStatus, setAgentStatus] = useState<"online" | "offline" | "checking">("checking");
-  const [isSavingPRD, setIsSavingPRD] = useState(false);
+  const [isSavingDocument, setIsSavingDocument] = useState(false);
   const [existingPRD, setExistingPRD] = useState<string>("");
+  const [existingSpec, setExistingSpec] = useState<string>("");
 
   // Auto-scroll to bottom when messages change
   const scrollToBottom = () => {
@@ -62,15 +73,34 @@ export function ChatSidebar() {
     }
   };
 
+  // Update context when location changes
+  useEffect(() => {
+    const newContext = getCurrentContext();
+    if (newContext !== currentContext) {
+      setCurrentContext(newContext);
+      // Clear messages when switching context
+      setMessages([]);
+      // Load templates for new context
+      loadAvailableTemplates(newContext);
+      // Set appropriate default template
+      if (newContext === "spec") {
+        setSelectedTemplate("api");
+      } else {
+        setSelectedTemplate("lean");
+      }
+    }
+  }, [location.hash, currentContext]);
+
   // Initialize chat and check agent status
   useEffect(() => {
     initializeChat();
     checkAgentStatus();
-    loadAvailableTemplates();
+    loadAvailableTemplates(currentContext);
     if (projectId) {
       loadExistingPRD();
+      loadExistingSpec();
     }
-  }, [projectId]);
+  }, [projectId, currentContext]);
 
   // Auto-scroll when messages change (but not during initial history load)
   useEffect(() => {
@@ -83,11 +113,15 @@ export function ChatSidebar() {
   const initializeChat = async () => {
     if (!projectId) {
       // No project selected, show welcome message
+      const welcomeContent =
+        currentContext === "spec"
+          ? "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?"
+          : "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+
       const welcomeMessage: Message = {
         id: "welcome",
         role: "assistant",
-        content:
-          "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?",
+        content: welcomeContent,
         timestamp: new Date(),
         type: "welcome",
       };
@@ -102,11 +136,15 @@ export function ChatSidebar() {
 
       if (chatHistory.length === 0) {
         // No existing chat history, show welcome message
+        const welcomeContent =
+          currentContext === "spec"
+            ? "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?"
+            : "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+
         const welcomeMessage: Message = {
           id: "welcome",
           role: "assistant",
-          content:
-            "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?",
+          content: welcomeContent,
           timestamp: new Date(),
           type: "welcome",
         };
@@ -125,11 +163,15 @@ export function ChatSidebar() {
     } catch (error) {
       console.error("Failed to load chat history:", error);
       // Fallback to welcome message
+      const welcomeContent =
+        currentContext === "spec"
+          ? "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?"
+          : "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+
       const welcomeMessage: Message = {
         id: "welcome",
         role: "assistant",
-        content:
-          "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?",
+        content: welcomeContent,
         timestamp: new Date(),
         type: "welcome",
       };
@@ -165,9 +207,9 @@ export function ChatSidebar() {
     }
   };
 
-  const loadAvailableTemplates = async () => {
+  const loadAvailableTemplates = async (agentType: "prd" | "spec" = currentContext) => {
     try {
-      const { templates } = await agentsApi.getTemplates();
+      const { templates } = await agentsApi.getTemplates(agentType);
       setAvailableTemplates(templates);
     } catch (error) {
       console.error("Failed to load templates:", error);
@@ -183,6 +225,18 @@ export function ChatSidebar() {
     } catch (error) {
       // PRD doesn't exist yet, which is fine
       setExistingPRD("");
+    }
+  };
+
+  const loadExistingSpec = async () => {
+    if (!projectId) return;
+
+    try {
+      const spec = await specApi.get(parseInt(projectId));
+      setExistingSpec(spec.content || "");
+    } catch (error) {
+      // Spec doesn't exist yet, which is fine
+      setExistingSpec("");
     }
   };
 
@@ -222,12 +276,20 @@ export function ChatSidebar() {
       const response: ChatResponse = await agentsApi.chat({
         message: inputValue,
         template_type: selectedTemplate,
+        agent_type: currentContext,
         project_id: projectId ? parseInt(projectId) : undefined,
-        project_context: {
-          existing_prd: existingPRD,
-          has_existing_prd: existingPRD.length > 0,
-          project_id: projectId ? parseInt(projectId) : undefined,
-        },
+        project_context:
+          currentContext === "spec"
+            ? {
+                existing_spec: existingSpec,
+                has_existing_spec: existingSpec.length > 0,
+                project_id: projectId ? parseInt(projectId) : undefined,
+              }
+            : {
+                existing_prd: existingPRD,
+                has_existing_prd: existingPRD.length > 0,
+                project_id: projectId ? parseInt(projectId) : undefined,
+              },
         chat_history: chatHistoryForAgent,
       });
 
@@ -253,9 +315,12 @@ export function ChatSidebar() {
         // Use the comprehensive refresh system to update all project data
         const refreshResult = await refreshProjectData(parseInt(projectId));
 
-        // Update local PRD state for chat context
+        // Update local document state for chat context
         if (refreshResult.prd) {
           setExistingPRD(refreshResult.prd.content || "");
+        }
+        if (refreshResult.spec) {
+          setExistingSpec(refreshResult.spec.content || "");
         }
 
         // Show success toast
@@ -308,8 +373,8 @@ export function ChatSidebar() {
 
   const handleClearConversation = async () => {
     try {
-      // Clear conversation in agents
-      await agentsApi.clearConversation();
+      // Clear conversation in agents for current context
+      await agentsApi.clearConversation(currentContext);
 
       // Clear chat history in backend if we have a project
       if (projectId) {
@@ -321,7 +386,7 @@ export function ChatSidebar() {
 
       toast({
         title: "Conversation Cleared",
-        description: "Chat history has been reset",
+        description: `${currentContext.toUpperCase()} chat history has been reset`,
       });
     } catch (error) {
       console.error("Failed to clear conversation:", error);
@@ -333,41 +398,63 @@ export function ChatSidebar() {
     }
   };
 
-  const savePRDToBackend = async (content: string, templateType: string) => {
+  const saveDocumentToBackend = async (content: string, templateType: string) => {
     if (!projectId) return;
 
-    setIsSavingPRD(true);
+    setIsSavingDocument(true);
     try {
-      // Always try to update first if we have existing PRD, otherwise create
-      if (existingPRD) {
-        await prdApi.update(parseInt(projectId), {
-          content,
-          status: "draft" as const,
+      if (currentContext === "spec") {
+        // Handle Spec saving
+        if (existingSpec) {
+          await specApi.update(parseInt(projectId), {
+            content,
+            status: "draft" as const,
+          });
+        } else {
+          await specApi.create(parseInt(projectId), {
+            title: `Spec - ${
+              templateType.charAt(0).toUpperCase() + templateType.slice(1)
+            } Template`,
+            content,
+            status: "draft" as const,
+          });
+        }
+        setExistingSpec(content);
+
+        toast({
+          title: "Spec Saved",
+          description: "Your technical specification has been automatically saved to the project.",
         });
       } else {
-        await prdApi.create(parseInt(projectId), {
-          title: `PRD - ${templateType.charAt(0).toUpperCase() + templateType.slice(1)} Template`,
-          content,
-          status: "draft" as const,
+        // Handle PRD saving
+        if (existingPRD) {
+          await prdApi.update(parseInt(projectId), {
+            content,
+            status: "draft" as const,
+          });
+        } else {
+          await prdApi.create(parseInt(projectId), {
+            title: `PRD - ${templateType.charAt(0).toUpperCase() + templateType.slice(1)} Template`,
+            content,
+            status: "draft" as const,
+          });
+        }
+        setExistingPRD(content);
+
+        toast({
+          title: "PRD Saved",
+          description: "Your PRD has been automatically saved to the project.",
         });
       }
-
-      // Update the existing PRD state so future requests are in update mode
-      setExistingPRD(content);
-
-      toast({
-        title: "PRD Saved",
-        description: "Your PRD has been automatically saved to the project.",
-      });
     } catch (error) {
-      console.error("Failed to save PRD:", error);
+      console.error(`Failed to save ${currentContext}:`, error);
       toast({
         title: "Save Failed",
-        description: "Failed to save PRD to backend. Please try again.",
+        description: `Failed to save ${currentContext.toUpperCase()} to backend. Please try again.`,
         variant: "destructive",
       });
     } finally {
-      setIsSavingPRD(false);
+      setIsSavingDocument(false);
     }
   };
 
@@ -385,13 +472,18 @@ export function ChatSidebar() {
               <Sparkles className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-sm">AI Assistant</h3>
+              <h3 className="font-semibold text-sm">
+                AI {currentContext === "spec" ? "Architect" : "PM"} Assistant
+              </h3>
               <div className="flex items-center gap-1">
                 <Badge
                   variant={agentStatus === "online" ? "default" : "destructive"}
                   className="text-xs"
                 >
                   {agentStatus}
+                </Badge>
+                <Badge variant="outline" className="text-xs">
+                  {currentContext.toUpperCase()}
                 </Badge>
               </div>
             </div>
@@ -413,7 +505,9 @@ export function ChatSidebar() {
 
         {/* Template selector */}
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">Template</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            {currentContext === "spec" ? "Spec Template" : "PRD Template"}
+          </label>
           <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
             <SelectTrigger className="h-8 text-xs">
               <SelectValue />
@@ -572,7 +666,9 @@ export function ChatSidebar() {
       <div className="border-t border-border p-4">
         <div className="flex gap-2 items-end">
           <Textarea
-            placeholder="Ask your AI teammate... (Shift+Enter for new line, Enter to send)"
+            placeholder={`Ask your AI ${
+              currentContext === "spec" ? "architect" : "teammate"
+            }... (Shift+Enter for new line, Enter to send)`}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}

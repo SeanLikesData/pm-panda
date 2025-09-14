@@ -7,6 +7,7 @@ import { api } from './api';
 export interface ChatRequest {
   message: string;
   template_type?: string;
+  agent_type?: 'prd' | 'spec';
   project_id?: number;
   project_context?: Record<string, any>;
   chat_history?: Array<{
@@ -54,7 +55,7 @@ class AgentsApi {
   private baseUrl = 'http://localhost:8000';
 
   /**
-   * Chat with the PRD creation agent
+   * Chat with the PRD or Spec creation agent
    */
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const response = await fetch(`${this.baseUrl}/agents/chat`, {
@@ -62,7 +63,10 @@ class AgentsApi {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify({
+        ...request,
+        agent_type: request.agent_type || 'prd'
+      }),
     });
 
     if (!response.ok) {
@@ -92,10 +96,32 @@ class AgentsApi {
   }
 
   /**
+   * Generate Spec directly without conversation
+   */
+  async generateSpec(request: ChatRequest): Promise<ChatResponse> {
+    const response = await fetch(`${this.baseUrl}/agents/generate-spec`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...request,
+        agent_type: 'spec'
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Spec generation failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
    * Get available templates
    */
-  async getTemplates(): Promise<{ templates: string[] }> {
-    const response = await fetch(`${this.baseUrl}/agents/templates`);
+  async getTemplates(agentType: 'prd' | 'spec' = 'prd'): Promise<{ templates: string[]; agent_type: string }> {
+    const response = await fetch(`${this.baseUrl}/agents/templates?agent_type=${agentType}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get templates: ${response.statusText}`);
@@ -107,8 +133,8 @@ class AgentsApi {
   /**
    * Get template information
    */
-  async getTemplateInfo(templateType: string): Promise<TemplateInfo> {
-    const response = await fetch(`${this.baseUrl}/agents/templates/${templateType}`);
+  async getTemplateInfo(templateType: string, agentType: 'prd' | 'spec' = 'prd'): Promise<TemplateInfo> {
+    const response = await fetch(`${this.baseUrl}/agents/templates/${templateType}?agent_type=${agentType}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get template info: ${response.statusText}`);
@@ -120,8 +146,8 @@ class AgentsApi {
   /**
    * Get conversation history
    */
-  async getConversationHistory(): Promise<ConversationHistory> {
-    const response = await fetch(`${this.baseUrl}/agents/conversation`);
+  async getConversationHistory(agentType: 'prd' | 'spec' = 'prd'): Promise<ConversationHistory> {
+    const response = await fetch(`${this.baseUrl}/agents/conversation?agent_type=${agentType}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get conversation history: ${response.statusText}`);
@@ -133,8 +159,8 @@ class AgentsApi {
   /**
    * Clear conversation history
    */
-  async clearConversation(): Promise<{ message: string }> {
-    const response = await fetch(`${this.baseUrl}/agents/conversation/clear`, {
+  async clearConversation(agentType: 'prd' | 'spec' = 'prd'): Promise<{ message: string }> {
+    const response = await fetch(`${this.baseUrl}/agents/conversation/clear?agent_type=${agentType}`, {
       method: 'POST',
     });
 

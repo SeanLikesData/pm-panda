@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -26,7 +26,17 @@ import { projectEventBus, type ProjectUpdateEvent } from "@/lib/projectEventBus"
 
 export function ProjectWorkspace() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [activeTab, setActiveTab] = useState("prd");
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Initialize active tab from URL hash or default to PRD
+  const getInitialTab = () => {
+    const hash = location.hash;
+    if (hash === "#spec") return "spec";
+    return "prd";
+  };
+
+  const [activeTab, setActiveTab] = useState(getInitialTab());
   const [viewMode, setViewMode] = useState<{ prd: "edit" | "preview"; spec: "edit" | "preview" }>({
     prd: "preview",
     spec: "preview",
@@ -51,6 +61,14 @@ export function ProjectWorkspace() {
     prd: { title: "", content: "", status: "draft" as DocStatus },
     spec: { title: "", content: "", technical_details: "", status: "draft" as DocStatus },
   });
+
+  // Update tab when URL hash changes
+  useEffect(() => {
+    const newTab = getInitialTab();
+    if (newTab !== activeTab) {
+      setActiveTab(newTab);
+    }
+  }, [location.hash]);
 
   // Load project data
   useEffect(() => {
@@ -594,7 +612,15 @@ export function ProjectWorkspace() {
       </div>
 
       {/* Tabs for PRD and Spec */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          // Update URL hash to reflect current tab
+          navigate(`${location.pathname}#${value}`, { replace: true });
+        }}
+        className="flex-1 flex flex-col"
+      >
         <div className="border-b border-border px-6">
           <TabsList className="bg-transparent p-0 h-auto">
             <TabsTrigger
