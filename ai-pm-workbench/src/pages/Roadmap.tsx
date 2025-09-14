@@ -30,15 +30,17 @@ import { roadmapApi, RoadmapTask } from "@/lib/roadmapApi";
 import { agentsApi } from "@/lib/agentsApi";
 import { useProjectStore } from "@/lib/projectStore";
 import { prdApi } from "@/lib/prdApi";
+import { useParams, useNavigate } from "react-router-dom";
 
 export default function Roadmap() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const { projects } = useProjectStore();
   const { toast } = useToast();
   const [roadmapTasks, setRoadmapTasks] = useState<RoadmapTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
 
   // Get current year quarters
   const currentYear = new Date().getFullYear();
@@ -49,27 +51,20 @@ export default function Roadmap() {
     `Q4 ${currentYear}`,
   ];
 
-  // Set default project selection
+  // Load roadmap tasks for the current project
   useEffect(() => {
-    if (projects.length > 0 && !selectedProjectId) {
-      setSelectedProjectId(projects[0].id);
+    if (projectId) {
+      loadProjectRoadmap(parseInt(projectId));
     }
-  }, [projects, selectedProjectId]);
+  }, [projectId]);
 
-  // Load roadmap tasks for selected project
-  useEffect(() => {
-    if (selectedProjectId) {
-      loadProjectRoadmap(selectedProjectId);
-    }
-  }, [selectedProjectId]);
-
-  const loadProjectRoadmap = async (projectId: number) => {
+  const loadProjectRoadmap = async (projectIdNum: number) => {
     try {
       setLoading(true);
-      const projectTasks = await roadmapApi.getProjectRoadmap(projectId);
+      const projectTasks = await roadmapApi.getProjectRoadmap(projectIdNum);
       setRoadmapTasks(projectTasks);
     } catch (error) {
-      console.error(`Failed to load roadmap for project ${projectId}:`, error);
+      console.error(`Failed to load roadmap for project ${projectIdNum}:`, error);
       toast({
         title: "Error",
         description: "Failed to load roadmap tasks",
@@ -109,9 +104,14 @@ export default function Roadmap() {
     }
   };
 
-  const getProjectName = (projectId: number) => {
-    const project = projects.find((p) => p.id === projectId);
-    return project?.name || `Project ${projectId}`;
+  const getProjectName = (projectIdNum: number) => {
+    const project = projects.find((p) => p.id === projectIdNum);
+    return project?.name || `Project ${projectIdNum}`;
+  };
+
+  const getCurrentProject = () => {
+    if (!projectId) return null;
+    return projects.find((p) => p.id === parseInt(projectId));
   };
 
   const moveTaskQuarter = async (taskId: number, direction: "up" | "down") => {
@@ -154,13 +154,15 @@ export default function Roadmap() {
   };
 
   const generateRoadmapForProject = async () => {
-    if (!selectedProjectId) return;
+    if (!projectId) return;
+
+    const projectIdNum = parseInt(projectId);
 
     try {
       setGeneratingRoadmap(true);
 
       // Get the project's PRD content
-      const prd = await prdApi.get(selectedProjectId);
+      const prd = await prdApi.get(projectIdNum);
       if (!prd || !prd.content) {
         toast({
           title: "No PRD found",
@@ -173,7 +175,7 @@ export default function Roadmap() {
       // Generate roadmap using AI
       await agentsApi.generateRoadmap({
         message: "Generate comprehensive roadmap tasks from this PRD",
-        project_id: selectedProjectId,
+        project_id: projectIdNum,
         project_context: {
           existing_prd: prd.content,
           existing_roadmap: roadmapTasks,
@@ -186,7 +188,7 @@ export default function Roadmap() {
       });
 
       // Reload roadmap tasks to show the new ones
-      await loadProjectRoadmap(selectedProjectId);
+      await loadProjectRoadmap(projectIdNum);
     } catch (error) {
       console.error("Failed to generate roadmap:", error);
       toast({
@@ -293,6 +295,10 @@ export default function Roadmap() {
     setDraggedItem(null);
   };
 
+  const handleProjectChange = (newProjectId: string) => {
+    navigate(`/project/${newProjectId}/roadmap`);
+  };
+
   if (loading) {
     return (
       <div className="p-6 space-y-6">
@@ -304,19 +310,34 @@ export default function Roadmap() {
     );
   }
 
+  if (!projectId) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <h2 className="text-xl font-semibold mb-2">No Project Selected</h2>
+            <p className="text-muted-foreground">Please select a project to view its roadmap.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentProject = getCurrentProject();
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Product Roadmap</h1>
-          <p className="text-muted-foreground mt-1">AI-generated roadmap tasks from your PRD</p>
+          <p className="text-muted-foreground mt-1">
+            {currentProject ? `${currentProject.name} - ` : ""}AI-generated roadmap tasks from your
+            PRD
+          </p>
         </div>
         <div className="flex items-center gap-4">
-          <Select
-            value={selectedProjectId?.toString() || ""}
-            onValueChange={(value) => setSelectedProjectId(parseInt(value))}
-          >
+          <Select value={projectId || ""} onValueChange={handleProjectChange}>
             <SelectTrigger className="w-64">
               <SelectValue placeholder="Select a project" />
             </SelectTrigger>
@@ -331,7 +352,7 @@ export default function Roadmap() {
           <Button
             className="bg-gradient-primary"
             onClick={generateRoadmapForProject}
-            disabled={generatingRoadmap || !selectedProjectId}
+            disabled={generatingRoadmap || !projectId}
           >
             {generatingRoadmap ? (
               <>
@@ -376,7 +397,9 @@ export default function Roadmap() {
                   <div className="text-center py-8 text-muted-foreground">
                     <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>No tasks planned for this quarter</p>
-                    <p className="text-sm mt-2">Generate AI roadmap or drag tasks here</p>
+                    <p className="text-sm mt-2">
+                      Generate AI roadmap or use the chat to create tasks
+                    </p>
                   </div>
                 ) : (
                   <div className="space-y-4">
