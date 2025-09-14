@@ -9,6 +9,12 @@ export interface ChatRequest {
   template_type?: string;
   project_id?: number;
   project_context?: Record<string, any>;
+  chat_history?: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: string;
+    metadata?: Record<string, any>;
+  }>;
 }
 
 export interface ChatResponse {

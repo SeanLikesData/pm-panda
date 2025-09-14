@@ -105,10 +105,23 @@ class PRDAgent:
         return SystemPrompts.BASE_SYSTEM_PROMPT
     
     async def chat(self, user_message: str, template_type: str = "lean", 
-                   project_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                   project_context: Optional[Dict[str, Any]] = None,
+                   chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Main chat interface for PRD creation."""
         
-        # Add user message to history
+        # Use provided chat history if available, otherwise use internal history
+        if chat_history:
+            # Convert chat history to internal format and replace internal history
+            self.conversation_history = []
+            for msg in chat_history:
+                self.conversation_history.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", ""),
+                    "timestamp": msg.get("timestamp", self._get_timestamp()),
+                    "metadata": msg.get("metadata", {})
+                })
+        
+        # Add current user message to history
         self.conversation_history.append({
             "role": "user",
             "content": user_message,
@@ -124,7 +137,7 @@ class PRDAgent:
             self.current_prd_data = {"existing_content": project_context["existing_prd"]}
         
         # Always generate AI response - no rule-based templated responses
-        response = await self._generate_prd_response(user_message, template_type, project_context)
+        response = await self._generate_prd_response(user_message, template_type, project_context, chat_history)
         
         # Add assistant response to history
         self.conversation_history.append({
@@ -136,7 +149,27 @@ class PRDAgent:
         
         return response
     
-    async def _generate_prd_response(self, user_message: str, template_type: str, project_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _detect_answer_for_me_request(self, user_message: str) -> bool:
+        """Detect if user is asking the agent to answer questions or make assumptions."""
+        answer_phrases = [
+            "answer the questions for me",
+            "fill in reasonable defaults",
+            "make assumptions",
+            "use your best judgment",
+            "create a sample",
+            "create an example",
+            "fill in the blanks",
+            "answer for me",
+            "make reasonable assumptions",
+            "use industry best practices",
+            "create a template",
+            "generate with defaults"
+        ]
+        
+        user_message_lower = user_message.lower()
+        return any(phrase in user_message_lower for phrase in answer_phrases)
+
+    async def _generate_prd_response(self, user_message: str, template_type: str, project_context: Optional[Dict[str, Any]] = None, chat_history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Generate PRD content response using OpenAI Agents SDK."""
         try:
             # Determine if we have existing PRD content
@@ -146,6 +179,9 @@ class PRDAgent:
             if project_context:
                 existing_prd = project_context.get("existing_prd", "")
                 has_existing_prd = project_context.get("has_existing_prd", False)
+            
+            # Check if user wants agent to make assumptions
+            should_make_assumptions = self._detect_answer_for_me_request(user_message)
             
             # Build context for the agent
             agent_context = {
@@ -191,7 +227,25 @@ When you have substantial PRD content to save, use the update_project_prd tool w
 """
             else:
                 # CREATION MODE - starting fresh
-                prompt = f"""
+                if should_make_assumptions:
+                    prompt = f"""
+USER REQUEST: {user_message}
+
+PROJECT ID: {project_id}
+
+The user has requested you to make assumptions and create PRD content. Use your PM expertise to:
+1. Make reasonable assumptions based on industry best practices
+2. Generate comprehensive PRD content using the {template_type} template
+3. Include notes about what assumptions were made
+4. Create realistic examples and metrics
+5. Suggest areas where the user should provide specific details later
+
+Generate a complete PRD that serves as a starting point for refinement.
+
+When you have substantial PRD content to save, use the update_project_prd tool with the project ID above.
+"""
+                else:
+                    prompt = f"""
 Create PRD content using {template_type} template: {user_message}
 
 PROJECT ID: {project_id}
@@ -205,6 +259,13 @@ When you have substantial PRD content to save, use the update_project_prd tool w
             # Check if tools were called by examining the result
             tool_calls_made = hasattr(result, 'tool_calls') and len(result.tool_calls) > 0
             
+            # Also check if the result contains any tool usage indicators
+            if not tool_calls_made and hasattr(result, 'messages'):
+                for message in result.messages:
+                    if hasattr(message, 'tool_calls') and message.tool_calls:
+                        tool_calls_made = True
+                        break
+            
             return {
                 "content": result.final_output,
                 "type": "prd_content",
@@ -212,7 +273,8 @@ When you have substantial PRD content to save, use the update_project_prd tool w
                 "metadata": {
                     "sections_generated": list(self.template_loader.get_template_sections(template_type).keys()),
                     "mode": "update" if has_existing_prd else "create",
-                    "tool_calls_made": tool_calls_made
+                    "tool_calls_made": tool_calls_made,
+                    "assumptions_made": should_make_assumptions
                 }
             }
             

@@ -22,13 +22,14 @@ import { prdApi } from "@/lib/prdApi";
 import { specApi } from "@/lib/specApi";
 import { useProjectStore } from "@/lib/projectStore";
 import type { BackendProject, BackendPRD, BackendSpec, DocStatus } from "@/lib/types";
+import { projectEventBus, type ProjectUpdateEvent } from "@/lib/projectEventBus";
 
 export function ProjectWorkspace() {
   const { projectId } = useParams<{ projectId: string }>();
   const [activeTab, setActiveTab] = useState("prd");
   const [viewMode, setViewMode] = useState<{ prd: "edit" | "preview"; spec: "edit" | "preview" }>({
-    prd: "edit",
-    spec: "edit",
+    prd: "preview",
+    spec: "preview",
   });
 
   const { toast } = useToast();
@@ -75,16 +76,25 @@ export function ProjectWorkspace() {
         // Try to load PRD
         try {
           const prdData = await prdApi.get(Number(projectId));
-          setPrd(prdData);
-          setContent((prev) => ({
-            ...prev,
-            prd: {
-              title: prdData.title,
-              content: prdData.content || "",
-              status: prdData.status,
-            },
-          }));
+          console.log("PRD API response:", prdData);
+
+          if (prdData) {
+            setPrd(prdData);
+            setContent((prev) => ({
+              ...prev,
+              prd: {
+                title: prdData.title,
+                content: prdData.content || "",
+                status: prdData.status,
+              },
+            }));
+          } else {
+            // Handle 304 response or empty response
+            console.log("PRD data is undefined (likely 304 response) - keeping existing state");
+            setPrd(null);
+          }
         } catch (error) {
+          console.error("Error loading PRD:", error);
           // PRD doesn't exist yet - content already reset above
           setPrd(null);
         }
@@ -92,17 +102,26 @@ export function ProjectWorkspace() {
         // Try to load Spec
         try {
           const specData = await specApi.get(Number(projectId));
-          setSpec(specData);
-          setContent((prev) => ({
-            ...prev,
-            spec: {
-              title: specData.title,
-              content: specData.content || "",
-              technical_details: specData.technical_details || "",
-              status: specData.status,
-            },
-          }));
+          console.log("Spec API response:", specData);
+
+          if (specData) {
+            setSpec(specData);
+            setContent((prev) => ({
+              ...prev,
+              spec: {
+                title: specData.title,
+                content: specData.content || "",
+                technical_details: specData.technical_details || "",
+                status: specData.status,
+              },
+            }));
+          } else {
+            // Handle 304 response or empty response
+            console.log("Spec data is undefined (likely 304 response) - keeping existing state");
+            setSpec(null);
+          }
         } catch (error) {
+          console.error("Error loading Spec:", error);
           // Spec doesn't exist yet - content already reset above
           setSpec(null);
         }
@@ -119,6 +138,115 @@ export function ProjectWorkspace() {
 
     loadData();
   }, [projectId, toast]);
+
+  // Listen for project updates from AI agent and other sources
+  useEffect(() => {
+    if (!projectId) return;
+
+    const handleProjectUpdate = (event: ProjectUpdateEvent) => {
+      // Only handle updates for the current project
+      if (event.projectId !== Number(projectId)) return;
+
+      console.log("ProjectWorkspace received update event:", event);
+
+      // Handle different types of updates
+      if (event.updateType === "all" || event.updateType === "project") {
+        // Update project data if provided
+        if (event.data?.project) {
+          setProject((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  name: event.data.project!.name,
+                  description: event.data.project!.description || null,
+                }
+              : null
+          );
+          setLocalTitle(event.data.project.name);
+          setLocalDescription(event.data.project.description || "");
+        }
+      }
+
+      if (event.updateType === "all" || event.updateType === "prd") {
+        // Update PRD data if provided
+        if (event.data?.prd) {
+          const updatedPRD: BackendPRD = {
+            id: event.data.prd.id || 0,
+            project_id: event.projectId,
+            title: event.data.prd.title,
+            content: event.data.prd.content,
+            status: event.data.prd.status as DocStatus,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          setPrd(updatedPRD);
+          setContent((prev) => ({
+            ...prev,
+            prd: {
+              title: event.data.prd!.title,
+              content: event.data.prd!.content,
+              status: event.data.prd!.status as DocStatus,
+            },
+          }));
+
+          // Auto-switch to PRD tab if update came from AI agent
+          if (event.source === "ai-agent" && activeTab !== "prd") {
+            setActiveTab("prd");
+          }
+        }
+      }
+
+      if (event.updateType === "all" || event.updateType === "spec") {
+        // Update Spec data if provided
+        if (event.data?.spec) {
+          const updatedSpec: BackendSpec = {
+            id: event.data.spec.id || 0,
+            project_id: event.projectId,
+            title: event.data.spec.title,
+            content: event.data.spec.content,
+            technical_details: event.data.spec.technical_details || null,
+            status: event.data.spec.status as DocStatus,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          setSpec(updatedSpec);
+          setContent((prev) => ({
+            ...prev,
+            spec: {
+              title: event.data.spec!.title,
+              content: event.data.spec!.content,
+              technical_details: event.data.spec!.technical_details || "",
+              status: event.data.spec!.status as DocStatus,
+            },
+          }));
+        }
+      }
+
+      // Show notification if update came from AI agent
+      if (event.source === "ai-agent") {
+        const updateTypes = [];
+        if (event.data?.project) updateTypes.push("project");
+        if (event.data?.prd) updateTypes.push("PRD");
+        if (event.data?.spec) updateTypes.push("spec");
+
+        if (updateTypes.length > 0) {
+          toast({
+            title: "Updated by AI",
+            description: `Your ${updateTypes.join(", ")} has been updated by the AI assistant.`,
+            duration: 3000,
+          });
+        }
+      }
+    };
+
+    const unsubscribe = projectEventBus.subscribe(handleProjectUpdate);
+
+    return () => {
+      unsubscribe();
+    };
+  }, [projectId, activeTab, toast]);
 
   const saveProject = async () => {
     if (!project || !localTitle.trim()) return;
@@ -334,19 +462,7 @@ export function ProjectWorkspace() {
               <div className="p-6">
                 {contentData.content ? (
                   <div className="prose prose-sm max-w-none dark:prose-invert prose-p:leading-relaxed prose-p:mb-4">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkBreaks]}
-                      components={{
-                        // Ensure line breaks are properly rendered
-                        br: ({ ...props }) => <br {...props} />,
-                        // Ensure paragraphs have proper spacing
-                        p: ({ children, ...props }) => (
-                          <p className="mb-4 leading-relaxed whitespace-pre-wrap" {...props}>
-                            {children}
-                          </p>
-                        ),
-                      }}
-                    >
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                       {type === "prd" ? contentData.content : content.spec.content}
                     </ReactMarkdown>
                   </div>

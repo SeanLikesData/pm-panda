@@ -25,7 +25,8 @@ app.add_middleware(
         AgentConfig.FRONTEND_URL,
         "http://localhost:3000",
         "http://localhost:5173",
-        "http://localhost:8080"
+        "http://localhost:8080",
+        "http://localhost:8081"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -41,6 +42,7 @@ class ChatRequest(BaseModel):
     template_type: str = "lean"
     project_id: Optional[int] = None
     project_context: Optional[Dict[str, Any]] = None
+    chat_history: Optional[List[Dict[str, Any]]] = None
 
 class ChatResponse(BaseModel):
     content: str
@@ -73,7 +75,8 @@ async def chat_with_agent(request: ChatRequest):
         response = await prd_agent.chat(
             user_message=request.message,
             template_type=request.template_type,
-            project_context=request.project_context
+            project_context=request.project_context,
+            chat_history=request.chat_history
         )
         
         return ChatResponse(

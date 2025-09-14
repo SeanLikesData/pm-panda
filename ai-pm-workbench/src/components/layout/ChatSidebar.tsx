@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Send, Bot, User, Sparkles, Settings, RefreshCw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -16,9 +16,12 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { agentsApi, type ChatResponse } from "@/lib/agentsApi";
 import { prdApi } from "@/lib/prdApi";
+import { chatApi } from "@/lib/chatApi";
 import { useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { refreshProjectData } from "@/lib/projectDataRefresh";
+import { useProjectStore } from "@/lib/projectStore";
 
 interface Message {
   id: string;
@@ -35,15 +38,29 @@ interface Message {
 export function ChatSidebar() {
   const { projectId } = useParams<{ projectId: string }>();
   const { toast } = useToast();
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState("lean");
   const [availableTemplates, setAvailableTemplates] = useState<string[]>([]);
   const [agentStatus, setAgentStatus] = useState<"online" | "offline" | "checking">("checking");
   const [isSavingPRD, setIsSavingPRD] = useState(false);
   const [existingPRD, setExistingPRD] = useState<string>("");
+
+  // Auto-scroll to bottom when messages change
+  const scrollToBottom = () => {
+    if (scrollAreaRef.current) {
+      const scrollContainer = scrollAreaRef.current.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      );
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+    }
+  };
 
   // Initialize chat and check agent status
   useEffect(() => {
@@ -55,16 +72,82 @@ export function ChatSidebar() {
     }
   }, [projectId]);
 
-  const initializeChat = () => {
-    const welcomeMessage: Message = {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?",
-      timestamp: new Date(),
-      type: "welcome",
-    };
-    setMessages([welcomeMessage]);
+  // Auto-scroll when messages change (but not during initial history load)
+  useEffect(() => {
+    if (!isLoadingHistory && messages.length > 0) {
+      // Small delay to ensure DOM is updated
+      setTimeout(scrollToBottom, 100);
+    }
+  }, [messages, isLoadingHistory]);
+
+  const initializeChat = async () => {
+    if (!projectId) {
+      // No project selected, show welcome message
+      const welcomeMessage: Message = {
+        id: "welcome",
+        role: "assistant",
+        content:
+          "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?",
+        timestamp: new Date(),
+        type: "welcome",
+      };
+      setMessages([welcomeMessage]);
+      return;
+    }
+
+    // Load chat history from backend
+    setIsLoadingHistory(true);
+    try {
+      const { messages: chatHistory } = await chatApi.getRecentMessages(parseInt(projectId), 100);
+
+      if (chatHistory.length === 0) {
+        // No existing chat history, show welcome message
+        const welcomeMessage: Message = {
+          id: "welcome",
+          role: "assistant",
+          content:
+            "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?",
+          timestamp: new Date(),
+          type: "welcome",
+        };
+        setMessages([welcomeMessage]);
+
+        // Save welcome message to backend
+        await chatApi.createMessage(
+          parseInt(projectId),
+          chatApi.convertToApiFormat(welcomeMessage)
+        );
+      } else {
+        // Convert API messages to frontend format
+        const convertedMessages = chatHistory.map((msg) => chatApi.convertFromApiFormat(msg));
+        setMessages(convertedMessages);
+      }
+    } catch (error) {
+      console.error("Failed to load chat history:", error);
+      // Fallback to welcome message
+      const welcomeMessage: Message = {
+        id: "welcome",
+        role: "assistant",
+        content:
+          "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?",
+        timestamp: new Date(),
+        type: "welcome",
+      };
+      setMessages([welcomeMessage]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const saveMessageToBackend = async (message: Message) => {
+    if (!projectId) return;
+
+    try {
+      await chatApi.createMessage(parseInt(projectId), chatApi.convertToApiFormat(message));
+    } catch (error) {
+      console.error("Failed to save message to backend:", error);
+      // Don't show error to user as this is background operation
+    }
   };
 
   const checkAgentStatus = async () => {
@@ -103,6 +186,13 @@ export function ChatSidebar() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading || agentStatus !== "online") return;
 
@@ -117,7 +207,18 @@ export function ChatSidebar() {
     setInputValue("");
     setIsLoading(true);
 
+    // Save user message to backend
+    await saveMessageToBackend(userMessage);
+
     try {
+      // Prepare chat history for the agent (exclude the current user message)
+      const chatHistoryForAgent = messages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp.toISOString(),
+        metadata: msg.metadata,
+      }));
+
       const response: ChatResponse = await agentsApi.chat({
         message: inputValue,
         template_type: selectedTemplate,
@@ -127,6 +228,7 @@ export function ChatSidebar() {
           has_existing_prd: existingPRD.length > 0,
           project_id: projectId ? parseInt(projectId) : undefined,
         },
+        chat_history: chatHistoryForAgent,
       });
 
       const assistantMessage: Message = {
@@ -142,13 +244,34 @@ export function ChatSidebar() {
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // Check if the agent used tools to update PRD (no automatic saving)
-      if (response.metadata?.tool_calls_made) {
-        // Agent used tools to save PRD, refresh our local state
-        await loadExistingPRD();
+      // Save assistant message to backend
+      await saveMessageToBackend(assistantMessage);
+
+      // Check if the agent used tools to update project data
+      console.log("Agent response metadata:", response.metadata);
+      try {
+        // Use the comprehensive refresh system to update all project data
+        const refreshResult = await refreshProjectData(parseInt(projectId));
+
+        // Update local PRD state for chat context
+        if (refreshResult.prd) {
+          setExistingPRD(refreshResult.prd.content || "");
+        }
+
+        // Show success toast
         toast({
-          title: "PRD Updated",
-          description: "The AI agent has updated your PRD.",
+          title: "Project Updated",
+          description: "The AI agent has updated your project data.",
+        });
+
+        console.log("Project data refresh completed:", refreshResult);
+      } catch (error) {
+        console.error("Failed to refresh project data:", error);
+        toast({
+          title: "Update Complete",
+          description:
+            "The AI agent has updated your project. Please refresh if you don't see changes.",
+          variant: "default",
         });
       }
 
@@ -185,14 +308,28 @@ export function ChatSidebar() {
 
   const handleClearConversation = async () => {
     try {
+      // Clear conversation in agents
       await agentsApi.clearConversation();
-      initializeChat();
+
+      // Clear chat history in backend if we have a project
+      if (projectId) {
+        await chatApi.clearMessages(parseInt(projectId));
+      }
+
+      // Reinitialize chat (will create new welcome message)
+      await initializeChat();
+
       toast({
         title: "Conversation Cleared",
         description: "Chat history has been reset",
       });
     } catch (error) {
       console.error("Failed to clear conversation:", error);
+      toast({
+        title: "Clear Failed",
+        description: "Failed to clear conversation history",
+        variant: "destructive",
+      });
     }
   };
 
@@ -239,7 +376,7 @@ export function ChatSidebar() {
   };
 
   return (
-    <div className="w-96 bg-gradient-card border-l border-border flex flex-col h-screen max-h-screen sticky top-0">
+    <div className="w-[460px] bg-gradient-card border-l border-border flex flex-col h-screen max-h-screen sticky top-0">
       {/* Chat header */}
       <div className="border-b border-border p-4">
         <div className="flex items-center justify-between mb-3">
@@ -293,7 +430,7 @@ export function ChatSidebar() {
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea ref={scrollAreaRef} className="flex-1 p-4">
         <div className="space-y-4">
           {messages.map((message) => (
             <div
@@ -394,18 +531,53 @@ export function ChatSidebar() {
               </div>
             </div>
           ))}
+
+          {/* AI thinking loader */}
+          {isLoading && (
+            <div className="flex gap-3">
+              <Avatar className="w-7 h-7 border border-border/50">
+                <AvatarImage />
+                <AvatarFallback>
+                  <Bot className="w-4 h-4 text-primary" />
+                </AvatarFallback>
+              </Avatar>
+
+              <div className="flex-1 space-y-1 items-start">
+                <div className="rounded-lg px-3 py-2 text-sm max-w-[85%] bg-muted text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span>AI is thinking</span>
+                    <div className="flex gap-1">
+                      <div
+                        className="w-1 h-1 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: "0ms" }}
+                      ></div>
+                      <div
+                        className="w-1 h-1 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: "200ms" }}
+                      ></div>
+                      <div
+                        className="w-1 h-1 bg-current rounded-full animate-pulse"
+                        style={{ animationDelay: "400ms" }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </ScrollArea>
 
       {/* Input area */}
       <div className="border-t border-border p-4">
-        <div className="flex gap-2">
-          <Input
-            placeholder="Ask your AI teammate..."
+        <div className="flex gap-2 items-end">
+          <Textarea
+            placeholder="Ask your AI teammate... (Shift+Enter for new line, Enter to send)"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-            className="flex-1"
+            onKeyDown={handleKeyDown}
+            className="flex-1 min-h-[40px] max-h-[120px] resize-none"
+            rows={1}
           />
           <Button
             size="sm"
