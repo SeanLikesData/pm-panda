@@ -43,13 +43,17 @@ export function ChatSidebar() {
   const [availableTemplates, setAvailableTemplates] = useState<string[]>([]);
   const [agentStatus, setAgentStatus] = useState<"online" | "offline" | "checking">("checking");
   const [isSavingPRD, setIsSavingPRD] = useState(false);
+  const [existingPRD, setExistingPRD] = useState<string>("");
 
   // Initialize chat and check agent status
   useEffect(() => {
     initializeChat();
     checkAgentStatus();
     loadAvailableTemplates();
-  }, []);
+    if (projectId) {
+      loadExistingPRD();
+    }
+  }, [projectId]);
 
   const initializeChat = () => {
     const welcomeMessage: Message = {
@@ -87,6 +91,18 @@ export function ChatSidebar() {
     }
   };
 
+  const loadExistingPRD = async () => {
+    if (!projectId) return;
+
+    try {
+      const prd = await prdApi.get(parseInt(projectId));
+      setExistingPRD(prd.content || "");
+    } catch (error) {
+      // PRD doesn't exist yet, which is fine
+      setExistingPRD("");
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading || agentStatus !== "online") return;
 
@@ -106,6 +122,11 @@ export function ChatSidebar() {
         message: inputValue,
         template_type: selectedTemplate,
         project_id: projectId ? parseInt(projectId) : undefined,
+        project_context: {
+          existing_prd: existingPRD,
+          has_existing_prd: existingPRD.length > 0,
+          project_id: projectId ? parseInt(projectId) : undefined,
+        },
       });
 
       const assistantMessage: Message = {
@@ -121,9 +142,14 @@ export function ChatSidebar() {
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // Auto-save PRD content to backend if it's a PRD response and we have a project ID
-      if (response.type === "prd_content" && projectId && response.content) {
-        await savePRDToBackend(response.content, selectedTemplate);
+      // Check if the agent used tools to update PRD (no automatic saving)
+      if (response.metadata?.tool_calls_made) {
+        // Agent used tools to save PRD, refresh our local state
+        await loadExistingPRD();
+        toast({
+          title: "PRD Updated",
+          description: "The AI agent has updated your PRD.",
+        });
       }
 
       // Show toast for clarification requests
@@ -175,20 +201,22 @@ export function ChatSidebar() {
 
     setIsSavingPRD(true);
     try {
-      // Try to update existing PRD first, then create if it doesn't exist
-      try {
+      // Always try to update first if we have existing PRD, otherwise create
+      if (existingPRD) {
         await prdApi.update(parseInt(projectId), {
           content,
           status: "draft" as const,
         });
-      } catch (updateError) {
-        // If update fails, try to create new PRD
+      } else {
         await prdApi.create(parseInt(projectId), {
           title: `PRD - ${templateType.charAt(0).toUpperCase() + templateType.slice(1)} Template`,
           content,
           status: "draft" as const,
         });
       }
+
+      // Update the existing PRD state so future requests are in update mode
+      setExistingPRD(content);
 
       toast({
         title: "PRD Saved",
