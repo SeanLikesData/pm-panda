@@ -88,4 +88,29 @@ export async function initDb(): Promise<void> {
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
   `);
+
+  // Chat messages table (many-to-one with project)
+  await run(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      message_type TEXT DEFAULT 'message',
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+  `);
+
+  // Create index for better query performance
+  await run(`
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_project_id 
+    ON chat_messages(project_id);
+  `);
+
+  await run(`
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at 
+    ON chat_messages(created_at);
+  `);
 }
