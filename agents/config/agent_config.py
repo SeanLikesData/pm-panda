@@ -11,7 +11,7 @@ class AgentConfig:
     
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
     
     # Agent Configuration
     AGENT_NAME = os.getenv("AGENT_NAME", "PRD_Assistant")
@@ -22,7 +22,7 @@ class AgentConfig:
     FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     
     # Template Configuration
-    TEMPLATES_PATH = "../backend/templates"
+    TEMPLATES_PATH = "../backend_m/templates"
     
     # Agent Behavior
     MAX_CLARIFICATION_ROUNDS = 3

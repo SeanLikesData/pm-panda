@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { projectApi } from './projectApi';
+import { refreshProjectData } from './projectDataRefresh';
 import type { BackendProject } from './types';
 
 interface ProjectStore {
@@ -11,6 +12,7 @@ interface ProjectStore {
   loadProjects: () => Promise<void>;
   createProject: (name: string, description?: string) => Promise<BackendProject | null>;
   updateProject: (id: number, updates: { name?: string; description?: string | null }) => Promise<BackendProject | null>;
+  refreshProject: (id: number) => Promise<void>;
   getProject: (id: number) => BackendProject | undefined;
 }
 
@@ -59,6 +61,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : 'Failed to update project', loading: false });
       return null;
+    }
+  },
+  
+  refreshProject: async (id: number) => {
+    try {
+      const result = await refreshProjectData(id);
+      if (result.project) {
+        set((state) => ({
+          projects: state.projects.map(project => 
+            project.id === id ? result.project! : project
+          )
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to refresh project in store:', error);
     }
   },
   
