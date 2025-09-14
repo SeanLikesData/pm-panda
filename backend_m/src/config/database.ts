@@ -103,6 +103,24 @@ export async function initDb(): Promise<void> {
     );
   `);
 
+  // Roadmap tasks table (many-to-one with project)
+  await run(`
+    CREATE TABLE IF NOT EXISTS roadmap_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      priority TEXT NOT NULL DEFAULT 'P2',
+      status TEXT NOT NULL DEFAULT 'planned',
+      quarter TEXT NOT NULL,
+      estimated_effort TEXT,
+      dependencies TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+  `);
+
   // Create index for better query performance
   await run(`
     CREATE INDEX IF NOT EXISTS idx_chat_messages_project_id 
@@ -112,5 +130,15 @@ export async function initDb(): Promise<void> {
   await run(`
     CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at 
     ON chat_messages(created_at);
+  `);
+
+  await run(`
+    CREATE INDEX IF NOT EXISTS idx_roadmap_tasks_project_id 
+    ON roadmap_tasks(project_id);
+  `);
+
+  await run(`
+    CREATE INDEX IF NOT EXISTS idx_roadmap_tasks_quarter 
+    ON roadmap_tasks(quarter);
   `);
 }

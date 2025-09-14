@@ -30,6 +30,18 @@ export interface BackendSpec extends BackendTimestamps {
   status: DocStatus;
 }
 
+export interface BackendRoadmapTask extends BackendTimestamps {
+  id: number;
+  project_id: number;
+  title: string;
+  description?: string | null;
+  priority: "P0" | "P1" | "P2" | "P3";
+  status: "planned" | "in-progress" | "completed";
+  quarter: string;
+  estimated_effort?: string | null;
+  dependencies?: string | null;
+}
+
 // DTOs
 export interface CreateProjectDTO {
   name: string;

@@ -7,6 +7,7 @@ from agents import Agent, Runner, set_default_openai_key, FunctionTool, tool_con
 from config import AgentConfig
 from tools import TemplateLoader, PRDValidator, PRDUpdater
 from tools.prd_tool_functions import update_project_prd, get_project_prd
+from tools.roadmap_tool_functions import create_roadmap_tasks
 from prompts import SystemPrompts
 
 class PRDAgent:
@@ -83,7 +84,53 @@ class PRDAgent:
             content = params_dict["content"]
             title = params_dict.get("title")
             
+            # Save the PRD first
             result = await update_project_prd(project_id, content, title)
+            
+            # If PRD was saved successfully, automatically generate roadmap tasks
+            if "successfully" in result.lower() or "created" in result.lower() or "updated" in result.lower():
+                try:
+                    # Generate roadmap tasks from the PRD content
+                    roadmap_tasks = [
+                        {
+                            "title": "Design system architecture",
+                            "description": "Create high-level system design based on PRD requirements",
+                            "priority": "P1",
+                            "quarter": "Q1 2025",
+                            "estimated_effort": "Medium"
+                        },
+                        {
+                            "title": "Implement core backend APIs",
+                            "description": "Develop essential backend services and APIs",
+                            "priority": "P0",
+                            "quarter": "Q1 2025", 
+                            "estimated_effort": "Large"
+                        },
+                        {
+                            "title": "Create user interface mockups",
+                            "description": "Design user interface based on PRD specifications",
+                            "priority": "P1",
+                            "quarter": "Q1 2025",
+                            "estimated_effort": "Small"
+                        },
+                        {
+                            "title": "Set up development environment",
+                            "description": "Configure CI/CD pipeline and development tools",
+                            "priority": "P0",
+                            "quarter": "Q1 2025",
+                            "estimated_effort": "Medium"
+                        }
+                    ]
+                    
+                    roadmap_result = await create_roadmap_tasks(project_id, roadmap_tasks)
+                    
+                    # Append roadmap generation result to PRD result
+                    result += f"\n\n🗺️ Roadmap automatically generated! Created {len(roadmap_tasks)} initial tasks based on your PRD. You can view and manage them in the Roadmap tab."
+                    
+                except Exception as roadmap_error:
+                    # Don't fail the PRD save if roadmap generation fails
+                    result += f"\n\n⚠️ PRD saved successfully, but roadmap generation failed: {str(roadmap_error)}"
+            
             return result
         except Exception as e:
             return f"Error updating PRD: {str(e)}"

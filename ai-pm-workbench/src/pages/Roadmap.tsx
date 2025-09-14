@@ -1,49 +1,124 @@
-import { useState } from "react";
-import { Calendar, Plus, MoreVertical, ArrowUp, ArrowDown } from "lucide-react";
+import { useState, useEffect } from "react";
+import {
+  Calendar,
+  Plus,
+  MoreVertical,
+  ArrowUp,
+  ArrowDown,
+  Sparkles,
+  Loader2,
+  ChevronDown,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { 
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useProjectStore } from "@/lib/projectStore";
-import { useNavigate } from "react-router-dom";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { roadmapApi, RoadmapTask } from "@/lib/roadmapApi";
+import { agentsApi } from "@/lib/agentsApi";
+import { useProjectStore } from "@/lib/projectStore";
+import { prdApi } from "@/lib/prdApi";
 
 export default function Roadmap() {
-  const { projects, addProject, updateProject } = useProjectStore();
-  const navigate = useNavigate();
+  const { projects } = useProjectStore();
   const { toast } = useToast();
-  const [draggedItem, setDraggedItem] = useState<string | null>(null);
-  const quarters = ["Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"];
+  const [roadmapTasks, setRoadmapTasks] = useState<RoadmapTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
+  const [draggedItem, setDraggedItem] = useState<number | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
 
-  const getStatusColor = (status: string) => {
+  // Get current year quarters
+  const currentYear = new Date().getFullYear();
+  const quarters = [
+    `Q1 ${currentYear}`,
+    `Q2 ${currentYear}`,
+    `Q3 ${currentYear}`,
+    `Q4 ${currentYear}`,
+  ];
+
+  // Set default project selection
+  useEffect(() => {
+    if (projects.length > 0 && !selectedProjectId) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [projects, selectedProjectId]);
+
+  // Load roadmap tasks for selected project
+  useEffect(() => {
+    if (selectedProjectId) {
+      loadProjectRoadmap(selectedProjectId);
+    }
+  }, [selectedProjectId]);
+
+  const loadProjectRoadmap = async (projectId: number) => {
+    try {
+      setLoading(true);
+      const projectTasks = await roadmapApi.getProjectRoadmap(projectId);
+      setRoadmapTasks(projectTasks);
+    } catch (error) {
+      console.error(`Failed to load roadmap for project ${projectId}:`, error);
+      toast({
+        title: "Error",
+        description: "Failed to load roadmap tasks",
+        variant: "destructive",
+      });
+      setRoadmapTasks([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status: RoadmapTask["status"]) => {
     switch (status) {
-      case "completed": return "bg-success text-success-foreground";
-      case "in-progress": return "bg-primary text-primary-foreground";
-      case "planned": return "bg-muted text-muted-foreground";
-      default: return "bg-muted text-muted-foreground";
+      case "completed":
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+      case "in-progress":
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+      case "planned":
+        return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
+      default:
+        return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
     }
   };
 
-  const getPriorityColor = (priority: string) => {
+  const getPriorityColor = (priority: RoadmapTask["priority"]) => {
     switch (priority) {
-      case "P0": return "text-destructive font-bold"; // Critical - Red & Bold
-      case "P1": return "text-warning font-semibold";  // High - Orange & Semi-bold  
-      case "P2": return "text-primary font-medium";    // Medium - Blue & Medium
-      case "P3": return "text-muted-foreground";       // Low - Muted
-      default: return "text-muted-foreground";
+      case "P0":
+        return "text-red-600 font-bold dark:text-red-400";
+      case "P1":
+        return "text-orange-600 font-semibold dark:text-orange-400";
+      case "P2":
+        return "text-blue-600 font-medium dark:text-blue-400";
+      case "P3":
+        return "text-gray-500 dark:text-gray-400";
+      default:
+        return "text-gray-500 dark:text-gray-400";
     }
   };
 
-  const movePriority = (id: string, direction: "up" | "down") => {
-    const project = projects.find(p => p.id === id);
-    if (!project) return;
+  const getProjectName = (projectId: number) => {
+    const project = projects.find((p) => p.id === projectId);
+    return project?.name || `Project ${projectId}`;
+  };
 
-    const currentQuarterIndex = quarters.indexOf(project.quarter);
+  const moveTaskQuarter = async (taskId: number, direction: "up" | "down") => {
+    const task = roadmapTasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    const currentQuarterIndex = quarters.indexOf(task.quarter);
     let newQuarterIndex;
 
     if (direction === "up") {
@@ -54,129 +129,161 @@ export default function Roadmap() {
 
     if (newQuarterIndex !== currentQuarterIndex) {
       const newQuarter = quarters[newQuarterIndex];
-      updateProject(id, { quarter: newQuarter });
-      
+
+      try {
+        await roadmapApi.updateTask(taskId, { quarter: newQuarter });
+
+        // Update local state
+        setRoadmapTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, quarter: newQuarter } : t))
+        );
+
+        toast({
+          title: "Task moved",
+          description: `Moved task to ${newQuarter}`,
+        });
+      } catch (error) {
+        console.error("Failed to move task:", error);
+        toast({
+          title: "Error",
+          description: "Failed to move task",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+  const generateRoadmapForProject = async () => {
+    if (!selectedProjectId) return;
+
+    try {
+      setGeneratingRoadmap(true);
+
+      // Get the project's PRD content
+      const prd = await prdApi.get(selectedProjectId);
+      if (!prd || !prd.content) {
+        toast({
+          title: "No PRD found",
+          description: "Please create a PRD for this project first",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Generate roadmap using AI
+      await agentsApi.generateRoadmap({
+        message: "Generate comprehensive roadmap tasks from this PRD",
+        project_id: selectedProjectId,
+        project_context: {
+          existing_prd: prd.content,
+          existing_roadmap: roadmapTasks,
+        },
+      });
+
       toast({
-        title: "Project moved",
-        description: `Moved project to ${newQuarter}.`,
+        title: "Roadmap generated!",
+        description: "AI has created roadmap tasks from your PRD",
+      });
+
+      // Reload roadmap tasks to show the new ones
+      await loadProjectRoadmap(selectedProjectId);
+    } catch (error) {
+      console.error("Failed to generate roadmap:", error);
+      toast({
+        title: "Generation failed",
+        description: "Failed to generate roadmap tasks",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingRoadmap(false);
+    }
+  };
+
+  const updateTaskStatus = async (taskId: number, newStatus: RoadmapTask["status"]) => {
+    try {
+      await roadmapApi.updateTask(taskId, { status: newStatus });
+
+      // Update local state
+      setRoadmapTasks((prev) =>
+        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
+      );
+
+      toast({
+        title: "Status updated",
+        description: `Task marked as ${newStatus.replace("-", " ")}`,
+      });
+    } catch (error) {
+      console.error("Failed to update task status:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update task status",
+        variant: "destructive",
       });
     }
   };
 
-  const handleAddInitiative = () => {
-    const newProjectId = (projects.length + 1).toString();
-    const newProject = {
-      name: `New Initiative ${newProjectId}`,
-      description: "Enter a brief description for this initiative...",
-      type: "feature" as const,
-      status: "planning" as const,
-      priority: "P2" as const,
-      quarter: "Q1 2024",
-      prd: `# Product Requirements Document: New Initiative ${newProjectId}
+  const deleteTask = async (taskId: number) => {
+    try {
+      await roadmapApi.deleteTask(taskId);
 
-## Problem Statement
-Define the problem this initiative aims to solve.
+      // Update local state
+      setRoadmapTasks((prev) => prev.filter((t) => t.id !== taskId));
 
-## Objectives
-- Primary goal 1
-- Primary goal 2
-- Primary goal 3
-
-## User Stories
-- As a user, I want...
-- As a stakeholder, I need...
-
-## Requirements
-### Functional Requirements
-1. Requirement 1
-2. Requirement 2
-
-### Non-Functional Requirements
-- Performance targets
-- Security requirements
-- Scalability needs
-
-## Success Metrics
-- Metric 1: [Target]
-- Metric 2: [Target]
-
-## Timeline
-- Phase 1: Planning
-- Phase 2: Development
-- Phase 3: Launch`,
-      spec: `# Technical Specification: New Initiative ${newProjectId}
-
-## Architecture Overview
-High-level technical approach for this initiative.
-
-## Core Components
-1. Component 1: Description
-2. Component 2: Description
-3. Component 3: Description
-
-## API Design
-### Endpoints
-\`\`\`
-GET /api/resource
-POST /api/resource
-PUT /api/resource/:id
-DELETE /api/resource/:id
-\`\`\`
-
-## Data Models
-\`\`\`typescript
-interface InitiativeData {
-  id: string;
-  name: string;
-  status: string;
-}
-\`\`\`
-
-## Implementation Plan
-1. Setup development environment
-2. Implement core functionality
-3. Add testing suite
-4. Deploy to staging
-5. Production release`
-    };
-    
-    addProject(newProject);
-    navigate(`/project/${newProjectId}`);
-    
-    toast({
-      title: "Initiative created!",
-      description: `${newProject.name} has been created successfully.`,
-    });
+      toast({
+        title: "Task deleted",
+        description: "Roadmap task has been deleted",
+      });
+    } catch (error) {
+      console.error("Failed to delete task:", error);
+      toast({
+        title: "Error",
+        description: "Failed to delete task",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleDragStart = (e: React.DragEvent, itemId: string) => {
-    setDraggedItem(itemId);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', itemId);
+  const handleDragStart = (e: React.DragEvent, taskId: number) => {
+    setDraggedItem(taskId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/html", taskId.toString());
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = "move";
   };
 
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
+  const handleDrop = async (e: React.DragEvent, targetQuarter: string) => {
     e.preventDefault();
-    
-    if (!draggedItem || draggedItem === targetId) {
+
+    if (!draggedItem) {
       setDraggedItem(null);
       return;
     }
 
-    const draggedProject = projects.find(p => p.id === draggedItem);
-    const targetProject = projects.find(p => p.id === targetId);
+    const draggedTask = roadmapTasks.find((t) => t.id === draggedItem);
+    if (draggedTask && draggedTask.quarter !== targetQuarter) {
+      try {
+        await roadmapApi.updateTask(draggedItem, { quarter: targetQuarter });
 
-    if (draggedProject && targetProject && draggedProject.quarter !== targetProject.quarter) {
-      updateProject(draggedItem, { quarter: targetProject.quarter });
-      toast({
-        title: "Project moved",
-        description: `Moved project to ${targetProject.quarter}.`,
-      });
+        // Update local state
+        setRoadmapTasks((prev) =>
+          prev.map((t) => (t.id === draggedItem ? { ...t, quarter: targetQuarter } : t))
+        );
+
+        toast({
+          title: "Task moved",
+          description: `Moved task to ${targetQuarter}`,
+        });
+      } catch (error) {
+        console.error("Failed to move task:", error);
+        toast({
+          title: "Error",
+          description: "Failed to move task",
+          variant: "destructive",
+        });
+      }
     }
 
     setDraggedItem(null);
@@ -186,27 +293,66 @@ interface InitiativeData {
     setDraggedItem(null);
   };
 
+  if (loading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <span className="ml-2 text-muted-foreground">Loading roadmap...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Product Roadmap</h1>
-          <p className="text-muted-foreground mt-1">
-            Strategic overview of all product initiatives and their timelines
-          </p>
+          <p className="text-muted-foreground mt-1">AI-generated roadmap tasks from your PRD</p>
         </div>
-        <Button className="bg-gradient-primary" onClick={handleAddInitiative}>
-          <Plus className="w-4 h-4 mr-2" />
-          Add Initiative
-        </Button>
+        <div className="flex items-center gap-4">
+          <Select
+            value={selectedProjectId?.toString() || ""}
+            onValueChange={(value) => setSelectedProjectId(parseInt(value))}
+          >
+            <SelectTrigger className="w-64">
+              <SelectValue placeholder="Select a project" />
+            </SelectTrigger>
+            <SelectContent>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id.toString()}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            className="bg-gradient-primary"
+            onClick={generateRoadmapForProject}
+            disabled={generatingRoadmap || !selectedProjectId}
+          >
+            {generatingRoadmap ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4 mr-2" />
+                Generate AI Roadmap
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Roadmap by Quarters */}
       <div className="grid gap-6">
         {quarters.map((quarter) => {
-          const quarterItems = projects.filter(project => project.quarter === quarter);
-          
+          const quarterTasks = roadmapTasks.filter((task) => task.quarter === quarter);
+
           return (
             <Card key={quarter} className="bg-gradient-card">
               <CardHeader className="border-b border-border">
@@ -216,53 +362,66 @@ interface InitiativeData {
                     {quarter}
                   </CardTitle>
                   <Badge variant="outline">
-                    {quarterItems.length} initiative{quarterItems.length !== 1 ? 's' : ''}
+                    {quarterTasks.length} task{quarterTasks.length !== 1 ? "s" : ""}
                   </Badge>
                 </div>
               </CardHeader>
-              
-              <CardContent className="p-6">
-                {quarterItems.length === 0 ? (
+
+              <CardContent
+                className="p-6"
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, quarter)}
+              >
+                {quarterTasks.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>No initiatives planned for this quarter</p>
+                    <p>No tasks planned for this quarter</p>
+                    <p className="text-sm mt-2">Generate AI roadmap or drag tasks here</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {quarterItems.map((item) => (
-                      <Card 
-                        key={item.id} 
+                    {quarterTasks.map((task) => (
+                      <Card
+                        key={task.id}
                         className={`border border-border/50 transition-all duration-200 cursor-move hover:shadow-md ${
-                          draggedItem === item.id ? 'opacity-50 scale-95' : ''
+                          draggedItem === task.id ? "opacity-50 scale-95" : ""
                         }`}
                         draggable
-                        onDragStart={(e) => handleDragStart(e, item.id)}
-                        onDragOver={handleDragOver}
-                        onDrop={(e) => handleDrop(e, item.id)}
+                        onDragStart={(e) => handleDragStart(e, task.id)}
                         onDragEnd={handleDragEnd}
                       >
                         <CardContent className="p-4">
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">
-                                <h3 className="font-semibold text-foreground">{item.name}</h3>
-                                <Badge className={getStatusColor(item.status)} variant="secondary">
-                                  {item.status.replace('-', ' ')}
+                                <h3 className="font-semibold text-foreground">{task.title}</h3>
+                                <Badge className={getStatusColor(task.status)} variant="secondary">
+                                  {task.status.replace("-", " ")}
                                 </Badge>
-                                <span className={`text-xs ${getPriorityColor(item.priority)}`}>
-                                  {item.priority}
+                                <span className={`text-xs ${getPriorityColor(task.priority)}`}>
+                                  {task.priority}
                                 </span>
+                                {task.estimated_effort && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {task.estimated_effort}
+                                  </Badge>
+                                )}
                               </div>
-                              <p className="text-sm text-muted-foreground">{item.description}</p>
+                              <p className="text-sm text-muted-foreground mb-2">
+                                {task.description}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Project: {getProjectName(task.project_id)}
+                              </p>
                             </div>
-                            
+
                             <div className="flex items-center gap-1 ml-4">
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => movePriority(item.id, "up")}
+                                onClick={() => moveTaskQuarter(task.id, "up")}
                                 className="h-8 w-8 p-0"
-                                disabled={quarters.indexOf(item.quarter) === 0}
+                                disabled={quarters.indexOf(task.quarter) === 0}
                                 title="Move to previous quarter"
                               >
                                 <ArrowUp className="w-3 h-3" />
@@ -270,9 +429,9 @@ interface InitiativeData {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => movePriority(item.id, "down")}
+                                onClick={() => moveTaskQuarter(task.id, "down")}
                                 className="h-8 w-8 p-0"
-                                disabled={quarters.indexOf(item.quarter) === quarters.length - 1}
+                                disabled={quarters.indexOf(task.quarter) === quarters.length - 1}
                                 title="Move to next quarter"
                               >
                                 <ArrowDown className="w-3 h-3" />
@@ -283,14 +442,30 @@ interface InitiativeData {
                                     <MoreVertical className="w-3 h-3" />
                                   </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="bg-popover border border-border shadow-md">
-                                  <DropdownMenuItem onClick={() => navigate(`/project/${item.id}`)}>
-                                    Edit Initiative
+                                <DropdownMenuContent
+                                  align="end"
+                                  className="bg-popover border border-border shadow-md"
+                                >
+                                  <DropdownMenuItem
+                                    onClick={() => updateTaskStatus(task.id, "planned")}
+                                  >
+                                    Mark as Planned
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem>Change Quarter</DropdownMenuItem>
-                                  <DropdownMenuItem>Update Status</DropdownMenuItem>
-                                  <DropdownMenuItem className="text-destructive">
-                                    Delete Initiative
+                                  <DropdownMenuItem
+                                    onClick={() => updateTaskStatus(task.id, "in-progress")}
+                                  >
+                                    Mark as In Progress
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => updateTaskStatus(task.id, "completed")}
+                                  >
+                                    Mark as Completed
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    className="text-destructive"
+                                    onClick={() => deleteTask(task.id)}
+                                  >
+                                    Delete Task
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>

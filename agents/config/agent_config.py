@@ -18,7 +18,7 @@ class AgentConfig:
     AGENT_DESCRIPTION = os.getenv("AGENT_DESCRIPTION", "AI Product Manager Assistant for PRD Creation")
     
     # Backend Integration
-    BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3001")
+    BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:4000")
     FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     
     # Template Configuration

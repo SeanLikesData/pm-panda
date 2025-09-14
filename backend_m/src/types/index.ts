@@ -26,6 +26,18 @@ export interface Spec extends Timestamps {
   status: "draft" | "review" | "approved";
 }
 
+export interface RoadmapTask extends Timestamps {
+  id: number;
+  project_id: number;
+  title: string;
+  description?: string | null;
+  priority: "P0" | "P1" | "P2" | "P3";
+  status: "planned" | "in-progress" | "completed";
+  quarter: string;
+  estimated_effort?: string | null;
+  dependencies?: string | null; // JSON array of task IDs
+}
+
 // Create/Update DTOs
 export interface CreateProjectDTO {
   name: string;
@@ -61,4 +73,24 @@ export interface UpdateSpecDTO {
   content?: string | null;
   technical_details?: string | null;
   status?: Spec["status"];
+}
+
+export interface CreateRoadmapTaskDTO {
+  title: string;
+  description?: string | null;
+  priority?: RoadmapTask["priority"];
+  status?: RoadmapTask["status"];
+  quarter: string;
+  estimated_effort?: string | null;
+  dependencies?: string | null;
+}
+
+export interface UpdateRoadmapTaskDTO {
+  title?: string;
+  description?: string | null;
+  priority?: RoadmapTask["priority"];
+  status?: RoadmapTask["status"];
+  quarter?: string;
+  estimated_effort?: string | null;
+  dependencies?: string | null;
 }

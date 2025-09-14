@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from pmagents import PRDAgent, SpecAgent
+from pmagents import PRDAgent, SpecAgent, RoadmapAgent
 from config import AgentConfig
 
 # Initialize FastAPI app
@@ -36,6 +36,7 @@ app.add_middleware(
 # Global agent instances
 prd_agent = PRDAgent()
 spec_agent = SpecAgent()
+roadmap_agent = RoadmapAgent()
 
 # Request/Response models
 class ChatRequest(BaseModel):
@@ -212,6 +213,74 @@ async def generate_spec_direct(request: ChatRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Spec generation error: {str(e)}")
+
+# Roadmap generation endpoints
+@app.post("/agents/generate-roadmap")
+async def generate_roadmap_from_prd(request: ChatRequest):
+    """Generate roadmap tasks from PRD content."""
+    try:
+        if not request.project_id:
+            raise HTTPException(status_code=400, detail="Project ID is required for roadmap generation")
+        
+        if not request.project_context or not request.project_context.get("existing_prd"):
+            raise HTTPException(status_code=400, detail="PRD content is required for roadmap generation")
+        
+        prd_content = request.project_context["existing_prd"]
+        existing_roadmap = request.project_context.get("existing_roadmap")
+        
+        response = await roadmap_agent.generate_roadmap_from_prd(
+            project_id=request.project_id,
+            prd_content=prd_content,
+            existing_roadmap=existing_roadmap
+        )
+        
+        return ChatResponse(
+            content=response["content"],
+            type=response.get("type", "roadmap_generation"),
+            metadata=response.get("metadata")
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Roadmap generation error: {str(e)}")
+
+@app.post("/agents/roadmap/chat", response_model=ChatResponse)
+async def chat_with_roadmap_agent(request: ChatRequest):
+    """Chat with roadmap planning agent."""
+    try:
+        response = await roadmap_agent.chat(
+            user_message=request.message,
+            project_context=request.project_context,
+            chat_history=request.chat_history
+        )
+        
+        return ChatResponse(
+            content=response["content"],
+            type=response.get("type", "roadmap_response"),
+            metadata=response.get("metadata")
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Roadmap agent error: {str(e)}")
+
+@app.get("/agents/roadmap/conversation", response_model=ConversationHistory)
+async def get_roadmap_conversation_history():
+    """Get conversation history for roadmap agent."""
+    try:
+        history = roadmap_agent.get_conversation_history()
+        return ConversationHistory(messages=history)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Roadmap history error: {str(e)}")
+
+@app.post("/agents/roadmap/conversation/clear")
+async def clear_roadmap_conversation():
+    """Clear conversation history for roadmap agent."""
+    try:
+        roadmap_agent.clear_conversation()
+        return {"message": "Roadmap conversation cleared successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Roadmap clear error: {str(e)}")
 
 # Validation endpoint
 @app.post("/agents/validate")
