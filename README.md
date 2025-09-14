@@ -1,10 +1,10 @@
-# PM Helper - AI-Powered PRD Creation Tool
+# PMPanda - AI-Powered Product Manager Workbench
 
-A React-based application that helps Product Managers create comprehensive Product Requirements Documents (PRDs) using AI assistance via local Ollama integration.
+A React-based application that helps Product Managers create and iterate on comprehensive Product Requirements Documents (PRDs) and SPEC docs using AI assistance.
 
 ## 🎯 Project Goals
 
-The PM Helper is designed to:
+The PMPanda is designed to:
 
 1. **Streamline PRD Creation**: Guide PMs through creating well-structured PRDs with AI assistance
 2. **Support Multiple Templates**: Offer various PRD templates (Lean, Agile, Startup, Amazon, Technical, Enterprise)
