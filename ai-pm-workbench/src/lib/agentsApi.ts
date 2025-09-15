@@ -118,6 +118,44 @@ class AgentsApi {
   }
 
   /**
+   * Generate roadmap tasks from PRD content
+   */
+  async generateRoadmap(request: ChatRequest): Promise<ChatResponse> {
+    const response = await fetch(`${this.baseUrl}/agents/generate-roadmap`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Roadmap generation failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Chat with roadmap planning agent
+   */
+  async chatRoadmap(request: ChatRequest): Promise<ChatResponse> {
+    const response = await fetch(`${this.baseUrl}/agents/roadmap/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Roadmap chat failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
    * Get available templates
    */
   async getTemplates(agentType: 'prd' | 'spec' = 'prd'): Promise<{ templates: string[]; agent_type: string }> {

@@ -30,7 +30,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useProjectStore } from "@/lib/projectStore";
 
 const appSections = [
-  { title: "Roadmap", url: "/roadmap", icon: BarChart3 },
   { title: "Company Info", url: "/company-info", icon: Building2 },
   { title: "Profile", url: "/profile", icon: User },
   { title: "Templates", url: "/templates", icon: Settings },
@@ -131,34 +130,48 @@ export function ProjectSidebar() {
             <SidebarMenu>
               {/* Projects */}
               {projects.map((project) => (
-                <SidebarMenuItem key={project.id}>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to={`/project/${project.id}`}
-                      className={({ isActive }) => getNavCls(isActive)}
-                      onClick={() => setSelectedProject(project.id.toString())}
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <Folder className="w-4 h-4 shrink-0" />
-                        {open && (
-                          <div className="flex-1 min-w-0 overflow-hidden">
-                            <p className="truncate text-sm font-medium leading-tight">
-                              {project.name}
-                            </p>
-                            <p className="truncate text-xs text-sidebar-foreground/50 leading-tight mt-0.5">
-                              {project.description &&
-                              project.description !==
-                                "Enter a brief description for this project..."
-                                ? project.description
-                                : "No description"}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                      {open && <ChevronRight className="w-3 h-3 opacity-50 shrink-0" />}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                <div key={project.id}>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild>
+                      <NavLink
+                        to={`/project/${project.id}`}
+                        className={({ isActive }) => getNavCls(isActive)}
+                        onClick={() => setSelectedProject(project.id.toString())}
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <Folder className="w-4 h-4 shrink-0" />
+                          {open && (
+                            <div className="flex-1 min-w-0 overflow-hidden">
+                              <p className="truncate text-sm font-medium leading-tight">
+                                {project.name}
+                              </p>
+                              <p className="truncate text-xs text-sidebar-foreground/50 leading-tight mt-0.5">
+                                {project.description &&
+                                project.description !==
+                                  "Enter a brief description for this project..."
+                                  ? project.description
+                                  : "No description"}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        {open && <ChevronRight className="w-3 h-3 opacity-50 shrink-0" />}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  {/* Project Roadmap Link */}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild>
+                      <NavLink
+                        to={`/project/${project.id}/roadmap`}
+                        className={({ isActive }) => cn(getNavCls(isActive), "ml-8")}
+                      >
+                        <BarChart3 className="w-4 h-4 shrink-0" />
+                        {open && <span>Roadmap</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </div>
               ))}
 
               {loading && (

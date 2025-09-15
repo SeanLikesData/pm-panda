@@ -39,7 +39,7 @@ const App = () => (
             }
           />
           <Route
-            path="/roadmap"
+            path="/project/:projectId/roadmap"
             element={
               <MainLayout>
                 <Roadmap />

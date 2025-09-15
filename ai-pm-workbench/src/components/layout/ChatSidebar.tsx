@@ -18,6 +18,7 @@ import { agentsApi, type ChatResponse } from "@/lib/agentsApi";
 import { prdApi } from "@/lib/prdApi";
 import { specApi } from "@/lib/specApi";
 import { chatApi } from "@/lib/chatApi";
+import { roadmapApi } from "@/lib/roadmapApi";
 import { useParams, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -42,14 +43,19 @@ export function ChatSidebar() {
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
-  // Determine current context from URL hash or default to PRD
-  const getCurrentContext = (): "prd" | "spec" => {
+  // Determine current context from URL path or hash
+  const getCurrentContext = (): "prd" | "spec" | "roadmap" => {
+    const pathname = location.pathname;
     const hash = location.hash;
+
+    if (pathname.includes("/roadmap") || hash.includes("roadmap")) return "roadmap";
     if (hash.includes("spec")) return "spec";
     return "prd";
   };
 
-  const [currentContext, setCurrentContext] = useState<"prd" | "spec">(getCurrentContext());
+  const [currentContext, setCurrentContext] = useState<"prd" | "spec" | "roadmap">(
+    getCurrentContext()
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -80,16 +86,22 @@ export function ChatSidebar() {
       setCurrentContext(newContext);
       // Clear messages when switching context
       setMessages([]);
-      // Load templates for new context
-      loadAvailableTemplates(newContext);
+      // Load templates for new context (only for PRD/Spec, roadmap doesn't use templates)
+      if (newContext !== "roadmap") {
+        loadAvailableTemplates(newContext);
+      } else {
+        setAvailableTemplates(["roadmap"]);
+      }
       // Set appropriate default template
       if (newContext === "spec") {
         setSelectedTemplate("api");
+      } else if (newContext === "roadmap") {
+        setSelectedTemplate("roadmap");
       } else {
         setSelectedTemplate("lean");
       }
     }
-  }, [location.hash, currentContext]);
+  }, [location.pathname, location.hash, currentContext]);
 
   // Initialize chat and check agent status
   useEffect(() => {
@@ -113,10 +125,17 @@ export function ChatSidebar() {
   const initializeChat = async () => {
     if (!projectId) {
       // No project selected, show welcome message
-      const welcomeContent =
-        currentContext === "spec"
-          ? "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?"
-          : "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+      let welcomeContent = "";
+      if (currentContext === "spec") {
+        welcomeContent =
+          "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?";
+      } else if (currentContext === "roadmap") {
+        welcomeContent =
+          "Hi! I'm your AI Roadmap assistant. I can help you create and manage roadmap tasks based on your PRD. Describe the tasks you need and I'll create them for you!";
+      } else {
+        welcomeContent =
+          "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+      }
 
       const welcomeMessage: Message = {
         id: "welcome",
@@ -136,10 +155,17 @@ export function ChatSidebar() {
 
       if (chatHistory.length === 0) {
         // No existing chat history, show welcome message
-        const welcomeContent =
-          currentContext === "spec"
-            ? "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?"
-            : "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+        let welcomeContent = "";
+        if (currentContext === "spec") {
+          welcomeContent =
+            "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?";
+        } else if (currentContext === "roadmap") {
+          welcomeContent =
+            "Hi! I'm your AI Roadmap assistant. I can help you create and manage roadmap tasks based on your PRD. Describe the tasks you need and I'll create them for you!";
+        } else {
+          welcomeContent =
+            "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+        }
 
         const welcomeMessage: Message = {
           id: "welcome",
@@ -163,10 +189,17 @@ export function ChatSidebar() {
     } catch (error) {
       console.error("Failed to load chat history:", error);
       // Fallback to welcome message
-      const welcomeContent =
-        currentContext === "spec"
-          ? "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?"
-          : "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+      let welcomeContent = "";
+      if (currentContext === "spec") {
+        welcomeContent =
+          "Hi! I'm your AI Technical Architect assistant. I can help you create comprehensive technical specifications using various templates. What system or feature would you like to design today?";
+      } else if (currentContext === "roadmap") {
+        welcomeContent =
+          "Hi! I'm your AI Roadmap assistant. I can help you create and manage roadmap tasks based on your PRD. Describe the tasks you need and I'll create them for you!";
+      } else {
+        welcomeContent =
+          "Hi! I'm your AI Product Manager assistant. I can help you create comprehensive PRDs using various templates. What product or feature would you like to work on today?";
+      }
 
       const welcomeMessage: Message = {
         id: "welcome",
@@ -207,9 +240,15 @@ export function ChatSidebar() {
     }
   };
 
-  const loadAvailableTemplates = async (agentType: "prd" | "spec" = currentContext) => {
+  const loadAvailableTemplates = async (agentType: "prd" | "spec" | "roadmap" = currentContext) => {
+    // Roadmap mode doesn't use templates
+    if (agentType === "roadmap") {
+      setAvailableTemplates(["roadmap"]);
+      return;
+    }
+
     try {
-      const { templates } = await agentsApi.getTemplates(agentType);
+      const { templates } = await agentsApi.getTemplates(agentType as "prd" | "spec");
       setAvailableTemplates(templates);
     } catch (error) {
       console.error("Failed to load templates:", error);
@@ -273,25 +312,44 @@ export function ChatSidebar() {
         metadata: msg.metadata,
       }));
 
-      const response: ChatResponse = await agentsApi.chat({
-        message: inputValue,
-        template_type: selectedTemplate,
-        agent_type: currentContext,
-        project_id: projectId ? parseInt(projectId) : undefined,
-        project_context:
-          currentContext === "spec"
-            ? {
-                existing_spec: existingSpec,
-                has_existing_spec: existingSpec.length > 0,
-                project_id: projectId ? parseInt(projectId) : undefined,
-              }
-            : {
-                existing_prd: existingPRD,
-                has_existing_prd: existingPRD.length > 0,
-                project_id: projectId ? parseInt(projectId) : undefined,
-              },
-        chat_history: chatHistoryForAgent,
-      });
+      let response: ChatResponse;
+
+      if (currentContext === "roadmap") {
+        // Use roadmap agent
+        const roadmapTasks = await roadmapApi.getProjectRoadmap(parseInt(projectId));
+
+        response = await agentsApi.chatRoadmap({
+          message: inputValue,
+          project_id: projectId ? parseInt(projectId) : undefined,
+          project_context: {
+            existing_prd: existingPRD,
+            existing_roadmap: roadmapTasks,
+            project_id: projectId ? parseInt(projectId) : undefined,
+          },
+          chat_history: chatHistoryForAgent,
+        });
+      } else {
+        // Use PRD or Spec agent
+        response = await agentsApi.chat({
+          message: inputValue,
+          template_type: selectedTemplate,
+          agent_type: currentContext as "prd" | "spec",
+          project_id: projectId ? parseInt(projectId) : undefined,
+          project_context:
+            currentContext === "spec"
+              ? {
+                  existing_spec: existingSpec,
+                  has_existing_spec: existingSpec.length > 0,
+                  project_id: projectId ? parseInt(projectId) : undefined,
+                }
+              : {
+                  existing_prd: existingPRD,
+                  has_existing_prd: existingPRD.length > 0,
+                  project_id: projectId ? parseInt(projectId) : undefined,
+                },
+          chat_history: chatHistoryForAgent,
+        });
+      }
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -374,7 +432,14 @@ export function ChatSidebar() {
   const handleClearConversation = async () => {
     try {
       // Clear conversation in agents for current context
-      await agentsApi.clearConversation(currentContext);
+      if (currentContext === "roadmap") {
+        // Clear roadmap conversation
+        await fetch(`http://localhost:8000/agents/roadmap/conversation/clear`, {
+          method: "POST",
+        });
+      } else {
+        await agentsApi.clearConversation(currentContext as "prd" | "spec");
+      }
 
       // Clear chat history in backend if we have a project
       if (projectId) {
@@ -462,6 +527,27 @@ export function ChatSidebar() {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  const getAssistantTitle = () => {
+    if (currentContext === "spec") return "AI Architect Assistant";
+    if (currentContext === "roadmap") return "AI Roadmap Assistant";
+    return "AI PM Assistant";
+  };
+
+  const getTemplateSelectorLabel = () => {
+    if (currentContext === "spec") return "Spec Template";
+    if (currentContext === "roadmap") return "Mode";
+    return "PRD Template";
+  };
+
+  const getPlaceholderText = () => {
+    if (currentContext === "roadmap") {
+      return "Describe the tasks you need... (Shift+Enter for new line, Enter to send)";
+    }
+    return `Ask your AI ${
+      currentContext === "spec" ? "architect" : "teammate"
+    }... (Shift+Enter for new line, Enter to send)`;
+  };
+
   return (
     <div className="w-[460px] bg-gradient-card border-l border-border flex flex-col h-screen max-h-screen sticky top-0">
       {/* Chat header */}
@@ -472,9 +558,7 @@ export function ChatSidebar() {
               <Sparkles className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-sm">
-                AI {currentContext === "spec" ? "Architect" : "PM"} Assistant
-              </h3>
+              <h3 className="font-semibold text-sm">{getAssistantTitle()}</h3>
               <div className="flex items-center gap-1">
                 <Badge
                   variant={agentStatus === "online" ? "default" : "destructive"}
@@ -503,24 +587,26 @@ export function ChatSidebar() {
           </div>
         </div>
 
-        {/* Template selector */}
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">
-            {currentContext === "spec" ? "Spec Template" : "PRD Template"}
-          </label>
-          <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {availableTemplates.map((template) => (
-                <SelectItem key={template} value={template} className="text-xs">
-                  {template.charAt(0).toUpperCase() + template.slice(1)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Template selector - only show for PRD and Spec modes */}
+        {currentContext !== "roadmap" && (
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              {getTemplateSelectorLabel()}
+            </label>
+            <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableTemplates.map((template) => (
+                  <SelectItem key={template} value={template} className="text-xs">
+                    {template.charAt(0).toUpperCase() + template.slice(1)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -666,9 +752,7 @@ export function ChatSidebar() {
       <div className="border-t border-border p-4">
         <div className="flex gap-2 items-end">
           <Textarea
-            placeholder={`Ask your AI ${
-              currentContext === "spec" ? "architect" : "teammate"
-            }... (Shift+Enter for new line, Enter to send)`}
+            placeholder={getPlaceholderText()}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}

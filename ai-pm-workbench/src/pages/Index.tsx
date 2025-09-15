@@ -43,7 +43,7 @@ const Index = () => {
             </Card>
 
             <Card className="bg-gradient-card border-border/50 hover:shadow-md transition-shadow cursor-pointer">
-              <Link to="/roadmap">
+              <Link to="/project/1/roadmap">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-sm">
                     <BarChart3 className="w-4 h-4 text-primary" />
